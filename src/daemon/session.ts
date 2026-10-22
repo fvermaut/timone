@@ -140,6 +140,12 @@ export interface SessionRequest {
    * empty, as it always is (PRD-10.R1, #87).
    */
   stage: PipelineStage;
+  /**
+   * The run this session belongs to, as the ledger writes it:
+   * `<project>#<ticket>/<seq>`. A box is named after it (timone#73). Absent
+   * for a session no run started.
+   */
+  runId?: string;
 }
 
 /** What {@link sessionRequest} is given to assemble a request from. */
@@ -381,6 +387,14 @@ export function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
  */
 export interface SessionRuntime {
   start(request: SessionRequest): Promise<StartedSession>;
+  /**
+   * Remove every box this runtime started that has not ended yet, and return
+   * when they are gone. **Synchronous on purpose**: it is called just before
+   * the process exits on a signal, and nothing else may run in between — no
+   * step's ending, no ledger write, no ticket comment (timone#73). Returns the
+   * names it removed. Absent for a runtime whose sessions die with the process.
+   */
+  stopAllNow?(): string[];
 }
 
 /**

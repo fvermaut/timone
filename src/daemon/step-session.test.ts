@@ -118,6 +118,35 @@ describe("a step session, started and watched", () => {
     });
   });
 
+  it("tells the runtime which run the session belongs to (timone#73)", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    const asked: SessionRequest[] = [];
+
+    await startStepSession(
+      depsOver(store, {
+        async start(given) {
+          asked.push(given);
+          return {
+            sessionId: "session-abc",
+            completed: Promise.resolve({ sessionId: "session-abc", ok: true }),
+          };
+        },
+      }),
+      { runId: run.id, request, label: `${run.id} (execution)` },
+    );
+
+    expect(asked).toEqual([
+      {
+        cwd: "/root",
+        prompt: "plan the next phase of scratch-app#7",
+        model: "claude-opus-5-5",
+        stage: "execution",
+        runId: "scratch-app#7/1",
+      },
+    ]);
+  });
+
   it("stamps the run's heartbeat on every tick of the ticker it was given", async () => {
     const clock = { now: "2026-09-27T10:00:00Z" };
     const store = newStore(clock);

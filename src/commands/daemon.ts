@@ -47,7 +47,8 @@ import { RunnerDriver } from "../runner/driver.js";
 import { RunnerSessions } from "../runner/session.js";
 import { PlannerDriver } from "../planner/driver.js";
 import { PlannerSessions } from "../planner/session.js";
-import { containerRuntime } from "../daemon/container-runtime.js";
+import { containerRuntime, dockerSpawn } from "../daemon/container-runtime.js";
+import { sweepLeftoverBoxes } from "../daemon/leftover-boxes.js";
 import { bringUpServices } from "../daemon/services.js";
 import { readRunEnv } from "../daemon/run-env.js";
 import { renderMessage } from "../daemon/transcript.js";
@@ -197,6 +198,8 @@ export interface RuntimeChoice {
   modelToken?: ModelTokenSource;
   /** Who the box commits as, from the manifest's identity. */
   commitIdentity?: { name: string; email: string };
+  /** The daemon's state file, which every box it starts is labelled with (timone#73). */
+  ledger?: string;
   /**
    * Where a boxed run's own operational notes go — today, only a forge token
    * that could not be refreshed ([#56](https://github.com/fvermaut/timone/issues/56)).
@@ -293,6 +296,7 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
       ...(choice.commitIdentity === undefined
         ? {}
         : { commitIdentity: choice.commitIdentity }),
+      ...(choice.ledger === undefined ? {} : { ledger: choice.ledger }),
       // Only when there is a root to materialize a stack's source under. A
       // runtime built without one still runs a session; it just has no
       // services beside it, which is 30h's behaviour before 30i.
@@ -408,6 +412,15 @@ export interface RunDaemonOptions {
    * running. Absent means no planner session starts.
    */
   planner?: PlannerDriver;
+  /**
+   * Removes the boxes an earlier daemon of this ledger left behind
+   * ([timone#73](https://github.com/fvermaut/timone/issues/73)). Run once,
+   * under the lock, before the first cycle. A refused daemon never runs it,
+   * so it can never remove a live daemon's boxes
+   * ([ADR-0025](../../doc/adr/0025-a-lock-holders-proof-of-life-is-its-process.md)).
+   * Absent means nothing is removed, which is what a test wants.
+   */
+  sweep?: () => Promise<void>;
   log?: (message: string) => void;
 }
 
@@ -444,6 +457,16 @@ export async function runDaemon(options: RunDaemonOptions): Promise<number> {
         log(
           `took the ledger back from ${lock.reclaimed.command} ` +
             `(pid ${lock.reclaimed.pid}), silent since ${lock.reclaimed.observedAt}`,
+        );
+      }
+      // First, and under the lock: a refused daemon never gets here, so the
+      // boxes it removes are never a live daemon's (timone#73). A sweep that
+      // fails is said, and the daemon starts anyway.
+      try {
+        await options.sweep?.();
+      } catch (error) {
+        log(
+          `could not remove leftover boxes: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
       // Once, under the lock and before the first cycle: no wake survives a
@@ -573,6 +596,29 @@ async function sayIfOutOfDate(
   if (notice !== undefined) say(notice);
 }
 
+/**
+ * The whole of what the daemon does on Ctrl-C or a SIGTERM: give the locks
+ * back, remove the boxes still running, say which, and exit (timone#73).
+ */
+export function stopOnSignal(
+  signal: "SIGINT" | "SIGTERM",
+  deps: {
+    releaseLocks: () => void;
+    runtime: SessionRuntime;
+    log: (message: string) => void;
+    exit: (code: number) => void;
+  },
+): void {
+  deps.releaseLocks();
+  const names = deps.runtime.stopAllNow?.() ?? [];
+  if (names.length > 0) {
+    deps.log(
+      `stopped: removed ${names.length} box(es) still running: ${names.join(", ")}`,
+    );
+  }
+  deps.exit(signal === "SIGINT" ? 130 : 143);
+}
+
 /** Register the `daemon` command on the program. */
 export function registerDaemonCommand(program: Command): void {
   program
@@ -666,6 +712,7 @@ export function registerDaemonCommand(program: Command): void {
             : { runtime: options.runtime as RuntimeName }),
           image: options.image ?? DEFAULT_IMAGE,
           root: process.cwd(),
+          ledger: statePath,
           // R23 clause 5: a commit the machine produces is Timone's own.
           ...(manifest.identity === undefined
             ? {}
@@ -695,7 +742,8 @@ export function registerDaemonCommand(program: Command): void {
       // the daemon quietly goes back to borrowing the host's login and long
       // runs start dying again for a reason nobody connects to a shell
       // (#55). This line is how that is noticed on day one instead.
-      if ((options.runtime ?? DEFAULT_RUNTIME) === "container") {
+      const boxed = (options.runtime ?? DEFAULT_RUNTIME) === "container";
+      if (boxed) {
         log(await modelLoginSummary());
       }
 
@@ -766,11 +814,21 @@ export function registerDaemonCommand(program: Command): void {
       // steps can run for an hour, and a Ctrl-C that waited for them would not
       // stop the daemon. A step cut short this way is found by the next
       // daemon's reclaim, which hands its run back to the runner and says why.
+      //
+      // ✏ The boxes still running are removed here, synchronously, so no
+      // step's ending is handled between their removal and the exit; the
+      // steps they ran are still found by the next daemon's reclaim. A box
+      // left running after the daemon stopped kept working and pushing
+      // (timone#73).
       for (const signal of ["SIGINT", "SIGTERM"] as const) {
-        process.once(signal, () => {
-          releaseHeldLocks();
-          process.exit(signal === "SIGINT" ? 130 : 143);
-        });
+        process.once(signal, () =>
+          stopOnSignal(signal, {
+            releaseLocks: releaseHeldLocks,
+            runtime,
+            log,
+            exit: (code) => process.exit(code),
+          }),
+        );
       }
 
       process.exitCode = await runDaemon({
@@ -791,6 +849,21 @@ export function registerDaemonCommand(program: Command): void {
         adapter,
         runner,
         planner,
+        // The boxes an earlier daemon of this ledger left behind are removed
+        // before the first cycle, and the log says which (timone#73). Only a
+        // boxed daemon starts boxes, so only a boxed daemon looks for them.
+        ...(boxed
+          ? {
+              sweep: async () => {
+                await sweepLeftoverBoxes({
+                  spawn: dockerSpawn,
+                  ledger: statePath,
+                  projects: Object.keys(manifest.projects),
+                  log,
+                });
+              },
+            }
+          : {}),
         // What this process is running, against what the default branch has
         // moved to (timone#5). `ls-remote`, so fvermaut's own checkout is
         // read and never written (ADR-0043's spirit, in his own folder).

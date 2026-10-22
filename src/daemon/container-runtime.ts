@@ -1,4 +1,5 @@
-import { spawn as spawnProcess } from "node:child_process";
+import { spawn as spawnProcess, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createInterface } from "node:readline";
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -110,8 +111,25 @@ export interface ContainerRuntimeOptions {
    * production run must never have.
    */
   credentials?: CredentialProvider;
-  /** Names the container. Behind a seam so a test is not clock-dependent. */
+  /**
+   * Names the container. Behind a seam so a test can know the name in
+   * advance. The default is {@link boxName} with a random suffix, new at
+   * every start.
+   */
   nameFor?: (request: SessionRequest) => string;
+  /**
+   * Removes the named boxes and returns once they are gone: the synchronous
+   * removal used when the daemon exits on a signal (timone#73). The real
+   * `docker rm -f` when absent and {@link spawn} is absent too.
+   */
+  removeNow?: (names: readonly string[]) => void;
+  /**
+   * The absolute path of the state file of the daemon that starts the box.
+   * Put on the box as its {@link LEDGER_LABEL}, so a daemon that starts later
+   * removes its own leftovers and no other box (timone#73). Absent means no
+   * label, which is what a test wants.
+   */
+  ledger?: string;
   /**
    * Stands the project's services up beside the box, and answers the network
    * the box joins ([ADR-0041](../../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md)
@@ -338,6 +356,20 @@ const BASH_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const BASH_MAX_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
+ * What docker writes to stderr when it refuses a `docker run` because another
+ * container already has the name. Such a start made no container, so the one
+ * under that name is not its to remove (timone#73).
+ */
+export const NAME_TAKEN = /Conflict\. The container name "[^"]*" is already in use/;
+
+/**
+ * The label every box carries: the absolute path of the state file of the
+ * daemon that started it. A starting daemon removes the boxes labelled with
+ * its own ledger, and only those (timone#73).
+ */
+export const LEDGER_LABEL = "timone.ledger";
+
+/**
  * The remote as a URL the box can actually open.
  *
  * **The box holds a forge token and no SSH key, and it never will** — a key is
@@ -386,7 +418,7 @@ export function parseSessionMessage(text: string): SDKMessage | undefined {
 }
 
 /** The real spawner: `docker`, with its stdout read a line at a time. */
-const dockerSpawn: ContainerSpawn = (command, args, options) => {
+export const dockerSpawn: ContainerSpawn = (command, args, options) => {
   const child = spawnProcess(command, args, {
     env: options?.env === undefined ? process.env : { ...process.env, ...options.env },
     stdio: [options?.stdin === "pipe" ? "pipe" : "ignore", "pipe", "pipe"],
@@ -825,6 +857,7 @@ function runArgs(
   network: string | undefined,
   env: readonly string[],
   interactive: boolean,
+  ledger: string | undefined,
 ): string[] {
   return [
     "run",
@@ -833,6 +866,9 @@ function runArgs(
     // path (including the ones `--rm` would not cover).
     "--name",
     name,
+    // Whose box this is, so a daemon that starts later can remove its own
+    // leftovers and nothing else (timone#73).
+    ...(ledger === undefined ? [] : ["--label", `${LEDGER_LABEL}=${ledger}`]),
     "--init",
     // Keeps the container's stdin open to the daemon, for a box that is
     // spoken to while it runs. No `-t`: the stream is JSON, not a terminal.
@@ -975,19 +1011,60 @@ function writeForgeToken(
 }
 
 /**
+ * The name a box is started under: `timone`, the project, the run's ticket and
+ * sequence, the stage, and `suffix`, joined with `-` (timone#73).
+ *
+ * Each part is lowercased and every run of characters docker would refuse
+ * becomes one `-`, so a project named `Scratch App` still gets a name docker
+ * takes. The suffix is what makes the name new at every start; the rest is
+ * what lets a human reading `docker ps` tell which run a box is.
+ */
+export function boxName(request: SessionRequest, suffix: string): string {
+  const run = /#(\d+)\/(\d+)$/.exec(request.runId ?? "");
+  return [
+    "timone",
+    request.workspace?.project.name ?? "session",
+    ...(run === null ? [] : [run[1], run[2]]),
+    request.stage,
+    suffix,
+  ]
+    .map((part) => part.toLowerCase().replace(/[^a-z0-9_.]+/g, "-"))
+    .join("-");
+}
+
+/**
  * A {@link SessionRuntime} that runs each session in its own container.
  */
 export function containerRuntime(
   options: ContainerRuntimeOptions,
 ): SessionRuntime {
   const spawn = options.spawn ?? dockerSpawn;
-  let sequence = 0;
+  // A random part rather than a counter: a counter starts again at 1 with
+  // every daemon, and a box an earlier daemon left behind still holds the
+  // name it would ask for (timone#73).
   const nameFor =
     options.nameFor ??
     ((request: SessionRequest) =>
-      `timone-${request.workspace?.project.name ?? "session"}-${++sequence}`);
+      boxName(request, randomBytes(4).toString("hex")));
+  // The real docker only when the runtime's own spawn is the real one too. A
+  // test runtime injects its spawn, and must never reach the real docker
+  // because it forgot this one: on fvermaut's machine that would remove a
+  // live run's box.
+  const removeNow =
+    options.removeNow ??
+    (options.spawn === undefined ? dockerRemoveNow : () => undefined);
+  // Every box this runtime started that has not ended, by name.
+  const live = new Set<string>();
 
   return {
+    stopAllNow(): string[] {
+      const names = [...live];
+      if (names.length === 0) return [];
+      removeNow(names);
+      live.clear();
+      return names;
+    },
+
     async start(request: SessionRequest): Promise<StartedSession> {
       const workspace = request.workspace;
       if (workspace === undefined) {
@@ -1069,6 +1146,10 @@ export function containerRuntime(
       }
 
       const name = nameFor(request);
+      // One removal per box: a stop and the ending it causes wait on the
+      // same one, so neither asks docker twice.
+      let removal: Promise<void> | undefined;
+      const remove = (): Promise<void> => (removal ??= destroy(spawn, name));
       const interactive = request.interactive === true;
       // The stage's prompt, with what the box knows about itself in front of
       // it. A run that does not know it is in a container reports the
@@ -1122,6 +1203,7 @@ export function containerRuntime(
             }),
       };
 
+      live.add(name);
       const container = spawn(
         "docker",
         runArgs(
@@ -1131,6 +1213,7 @@ export function containerRuntime(
           stack?.network,
           Object.keys(env),
           interactive,
+          options.ledger,
         ),
         interactive ? { env, stdin: "pipe" } : { env },
       );
@@ -1143,7 +1226,8 @@ export function containerRuntime(
       if (interactive && stdin === undefined) {
         // A spawner that ignored `stdin: "pipe"`: a wiring fault, not
         // anything a run did. Nothing is left running behind it.
-        destroy(spawn, name);
+        await remove();
+        live.delete(name);
         if (stack !== undefined) await stack.down().catch(() => undefined);
         throw new Error(
           "an interactive box was started without a stdin to write its messages to",
@@ -1187,9 +1271,11 @@ export function containerRuntime(
         let id = "unknown";
         let lastApiError: string | undefined;
         let outcome: SessionOutcome | undefined;
+        let read = false;
 
         try {
           for await (const text of container.lines) {
+            read = true;
             const message = parseSessionMessage(text);
 
             // The session id comes off the first message, so it is known
@@ -1254,11 +1340,20 @@ export function containerRuntime(
         refresh?.stop();
 
         const exit = await container.exit;
-        // Destroyed on **every** path, including this one — a leaked container
-        // holds a name, a network and a gigabyte of shared memory, and the
-        // next run on the same project cannot take the name back. The stack
-        // goes with it, for the same reason and on the same paths.
-        destroy(spawn, name);
+        // A start docker refused because the name was taken: this start did
+        // not make that container, and it may be a live run's (timone#73).
+        const madeNoBox =
+          !read && exit.code === 125 && NAME_TAKEN.test(exit.stderr);
+        // Destroyed on **every** path that made it, including this one — a
+        // leaked container holds a name, a network and a gigabyte of shared
+        // memory, and the next run on the same project cannot take the name
+        // back. The stack goes down on every path, the refused start's too,
+        // because this start stood it up.
+        //
+        // Out of the live set only once it is gone, so a stop arriving while
+        // the removal runs still removes it. A refused start made nothing.
+        if (!madeNoBox) await remove();
+        live.delete(name);
         if (stack !== undefined) await stack.down().catch(() => undefined);
         resolveId(id);
 
@@ -1281,9 +1376,10 @@ export function containerRuntime(
         // [#69](https://github.com/fvermaut/timone/issues/69) exactly. With
         // the container gone the client exits by itself, the line stream
         // ends, and `completed` settles down the ordinary path — including
-        // the `destroy` below, which is content to remove what is already
-        // gone.
-        stop: () => destroy(spawn, name),
+        // its removal, which is this same one, waited for.
+        stop: () => {
+          void remove();
+        },
         ...(stdin === undefined ? {} : { send: say }),
       };
     },
@@ -1311,13 +1407,33 @@ function userMessageLine(text: string): string {
   return `${JSON.stringify(message)}\n`;
 }
 
-/** Remove the container, whatever state it is in. Never throws. */
-function destroy(spawn: ContainerSpawn, name: string): void {
+/**
+ * Remove the container, whatever state it is in. Never throws, and never
+ * rejects. It is waited for, so the next step never finds the name or the
+ * network still in use (timone#73, comment of 2026-09-07).
+ */
+async function destroy(spawn: ContainerSpawn, name: string): Promise<void> {
   try {
-    void spawn("docker", ["rm", "-f", name]).exit.catch(() => undefined);
+    await spawn("docker", ["rm", "-f", name]).exit.catch(() => undefined);
   } catch {
     // A teardown that fails is not a reason to lose the run's outcome. The
     // leak is visible in `docker ps -a`, which 30h's own gate reads.
+  }
+}
+
+/**
+ * Remove the named containers, and return only when docker has. Synchronous,
+ * because it runs just before the process exits on a signal. Never throws: a
+ * removal that fails must not stop the exit.
+ */
+function dockerRemoveNow(names: readonly string[]): void {
+  try {
+    spawnSync("docker", ["rm", "-f", ...names], {
+      stdio: "ignore",
+      timeout: 20_000,
+    });
+  } catch {
+    // What is left behind is visible in `docker ps -a`.
   }
 }
 

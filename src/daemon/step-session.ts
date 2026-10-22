@@ -124,7 +124,8 @@ export async function startStepSession(
 
   let started: StartedSession;
   try {
-    started = await runtime.start(input.request);
+    // The run id is what the box is named after (timone#73).
+    started = await runtime.start({ ...input.request, runId });
     store.activate(runId, started.sessionId, holder);
   } catch (error) {
     if (parked !== undefined) store.park(runId, waitOf(parked));

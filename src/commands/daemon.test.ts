@@ -32,8 +32,9 @@ import {
   machineAdapter,
   runDaemon,
   runtimeFor,
+  stopOnSignal,
 } from "./daemon.js";
-import { agentSdkRuntime } from "../daemon/session.js";
+import { agentSdkRuntime, type SessionRuntime } from "../daemon/session.js";
 import { enqueue } from "../daemon/requests.js";
 import { RunnerDriver } from "../runner/driver.js";
 import { RunningSteps } from "../runner/actions.js";
@@ -732,3 +733,182 @@ describe("the daemon says when its own process is running old code", () => {
     expect(said.join("\n")).not.toMatch(/old copy/i);
   });
 });
+
+/**
+ * What the daemon does on Ctrl-C, or on a SIGTERM. A box left running after
+ * the daemon stopped kept working and pushing, and the next daemon found its
+ * name taken (timone#73).
+ */
+describe("stopOnSignal", () => {
+  it("releases the locks, removes the boxes still running, says which, then exits 130", () => {
+    const calls: string[] = [];
+    const runtime: SessionRuntime = {
+      start: () => Promise.reject(new Error("no session is started here")),
+      stopAllNow: () => {
+        calls.push("stopAllNow");
+        return ["timone-a", "timone-b"];
+      },
+    };
+
+    stopOnSignal("SIGINT", {
+      releaseLocks: () => calls.push("releaseLocks"),
+      runtime,
+      log: (message) => calls.push(`log: ${message}`),
+      exit: (code) => calls.push(`exit: ${code}`),
+    });
+
+    expect(calls).toEqual([
+      "releaseLocks",
+      "stopAllNow",
+      "log: stopped: removed 2 box(es) still running: timone-a, timone-b",
+      "exit: 130",
+    ]);
+  });
+
+  it("exits 143 on a SIGTERM", () => {
+    const codes: number[] = [];
+    const runtime: SessionRuntime = {
+      start: () => Promise.reject(new Error("no session is started here")),
+      stopAllNow: () => ["timone-a"],
+    };
+
+    stopOnSignal("SIGTERM", {
+      releaseLocks: () => {},
+      runtime,
+      log: () => {},
+      exit: (code) => codes.push(code),
+    });
+
+    expect(codes).toEqual([143]);
+  });
+
+  it("only releases the locks and exits for a runtime whose sessions die with the process", () => {
+    const calls: string[] = [];
+
+    stopOnSignal("SIGINT", {
+      releaseLocks: () => calls.push("releaseLocks"),
+      runtime: agentSdkRuntime,
+      log: (message) => calls.push(`log: ${message}`),
+      exit: (code) => calls.push(`exit: ${code}`),
+    });
+
+    expect(calls).toEqual(["releaseLocks", "exit: 130"]);
+  });
+});
+
+describe("runDaemon — a starting daemon removes its leftover boxes first (timone#73)", () => {
+  it("removes them once, under the lock, before the first cycle asks the forge anything", async () => {
+    const { store, statePath } = clockedStore();
+    const seen: string[] = [];
+    const recording: TicketingAdapter = {
+      ...quietAdapter(),
+      async listMarkedTickets(): Promise<Ticket[]> {
+        seen.push("listMarkedTickets");
+        return [];
+      },
+      async listOpenTickets(): Promise<never[]> {
+        seen.push("listOpenTickets");
+        return [];
+      },
+    };
+
+    const code = await runDaemon({
+      manifest: manifest,
+      store,
+      statePath,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter: recording,
+      runner: standInRunner(store, recording),
+      sweep: async () => {
+        seen.push("sweep");
+      },
+      log: () => {},
+    });
+
+    expect(code).toBe(0);
+    expect(seen.filter((call) => call === "sweep")).toHaveLength(1);
+    expect(seen[0]).toBe("sweep");
+    expect(seen.length).toBeGreaterThan(1);
+  });
+
+  it("never removes anything when it is refused, because the boxes are a live daemon's", async () => {
+    const { store, statePath } = clockedStore();
+    let releaseCycle = (): void => {};
+    const held = new Promise<void>((done) => {
+      releaseCycle = done;
+    });
+    const blocking: TicketingAdapter = {
+      ...quietAdapter(),
+      async listMarkedTickets(): Promise<Ticket[]> {
+        await held;
+        return [];
+      },
+    };
+    const first = runDaemon({
+      manifest: manifest,
+      store,
+      statePath,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter: blocking,
+      runner: standInRunner(store, blocking),
+      log: () => {},
+    });
+
+    let swept = 0;
+    const second = RunStore.open(statePath);
+    const other = quietAdapter();
+    const code = await runDaemon({
+      manifest: manifest,
+      store: second,
+      statePath,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter: other,
+      runner: standInRunner(second, other),
+      sweep: async () => {
+        swept += 1;
+      },
+      log: () => {},
+    });
+
+    expect(code).toBe(1);
+    expect(swept).toBe(0);
+
+    releaseCycle();
+    expect(await first).toBe(0);
+  });
+
+  it("says why it could not remove them, and polls anyway", async () => {
+    const { store, statePath } = clockedStore();
+    const seen: string[] = [];
+    const recording: TicketingAdapter = {
+      ...quietAdapter(),
+      async listMarkedTickets(): Promise<Ticket[]> {
+        seen.push("listMarkedTickets");
+        return [];
+      },
+    };
+    const said: string[] = [];
+
+    const code = await runDaemon({
+      manifest: manifest,
+      store,
+      statePath,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter: recording,
+      runner: standInRunner(store, recording),
+      sweep: async () => {
+        throw new Error("docker is not running");
+      },
+      log: (line) => said.push(line),
+    });
+
+    expect(code).toBe(0);
+    expect(said.join("\n")).toContain("docker is not running");
+    expect(seen).toContain("listMarkedTickets");
+  });
+});
+

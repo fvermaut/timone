@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-18.
+**Last updated:** 2026-10-22.
 
 ---
 
@@ -100,6 +100,10 @@ The review of the code style found nothing. The review against the requirements 
 
 **What I need from you:** run the replay, the scratch-app check and the 70 tests on your machine, then review and merge #257.
 
+**1v. A box could not start because an earlier box still held its name ([#73](https://github.com/fvermaut/timone/issues/73)): pull request [#261](https://github.com/fvermaut/timone/pull/261) is open for your review, in Timone's own repository, from the branch `timone/73-a-box-could-not-start-because-a-name-fro-chunk-2`.** A box is now named after its run (project, ticket, run number, step) with a random part, so a restarted daemon no longer asks for a name an earlier one used. The end of a box waits until docker has removed it. A start that docker refused because the name was taken removes nothing. Ctrl-C removes the boxes still running and names them in the log. A daemon that starts removes the boxes an earlier daemon of the same ledger left behind, and names them. The check against a stand-in for docker found no fault, and the 21 older checks this change could affect passed. The review of the code style found 4 things: repeated `docker rm -f` code, a bare exit code, a function with seven arguments, and one result shape that differs from the one next to it. The review against the requirements found 1: a cancel or Ctrl-C in the moment between starting a box and docker refusing its name can still remove the other container; with the random part this is now very unlikely. Both are in the [delivery report](https://github.com/fvermaut/timone/blob/timone/73-a-box-could-not-start-because-a-name-fro-chunk-2/doc/plans/phases/reports/phase-66-delivery.md). Before you merge, not run, and only you can run them: the check on a machine with real docker, the watched check on scratch-app, and the whole test suite (70 tests fail in the container only because it refuses their pushes to `main`, [#220](https://github.com/fvermaut/timone/issues/220)). This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** run the check on real docker, then review and merge #261.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
@@ -178,6 +182,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**22 October — a box's name now belongs to its run ([#73](https://github.com/fvermaut/timone/issues/73)): pull request [#261](https://github.com/fvermaut/timone/pull/261) is open, from the branch `timone/73-a-box-could-not-start-because-a-name-fro-chunk-2`.** The check of the fix found no fault. The check on real docker is still owed. Item 1v says what is needed.
 
 **18 October — the check at the end of a session no longer reports PRD-07.R3 by mistake ([#250](https://github.com/fvermaut/timone/issues/250)), on the branch `timone/250-the-verified-status-check-reads-was-neve`, open for your review as [pull request #257](https://github.com/fvermaut/timone/pull/257).** The check of the fix found no fault, and the two reviews found nothing. Parts of three older checks need the replay or a GitHub login that this container does not have. Item 1u says what is needed.
 
